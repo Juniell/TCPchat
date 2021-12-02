@@ -52,7 +52,8 @@ class TCPServer(
         }
 
         // Если получен пакет типа AUTH, username не занят и у пользователя корректное время
-        if (msg.command == Command.AUTH && checkUsernames(msg.username) && System.currentTimeMillis() / 1000L - msg.time <= 30) {
+        val timeDiff = System.currentTimeMillis() / 1000L - msg.time
+        if (msg.command == Command.AUTH && checkUsernames(msg.username) && timeDiff <= 30) {
             sendMsg(socket, Command.AUTH, serverName, ServersMsg.OK.message)  // Отправляем OK
             val readClientThread = Thread { readClientsMsg(socket) }    // Создаём поток на чтение
             clients[socket] = msg.username to readClientThread   // Добавляем в список клиентов, запоминаем ник и поток
@@ -70,7 +71,15 @@ class TCPServer(
             )
         } else {
             // Отправляем сообщение об ошибке авторизации
-            sendMsg(socket, Command.AUTH, serverName, ServersMsg.AUTH_USERNAME_INVALID.message)
+            sendMsg(
+                socket,
+                Command.AUTH,
+                serverName,
+                if (timeDiff > 30)
+                    ServersMsg.ERROR_TIME.message
+                else
+                    ServersMsg.AUTH_USERNAME_INVALID.message
+            )
             socket.close()  // Закрываем соединение
             if (log)
                 println("[${getTimeStr()}] Client rejected: ${socket.inetAddress}")
@@ -120,7 +129,7 @@ class TCPServer(
             try {
                 msg = getMsg(socket)
             } catch (e: IOException) {
-                closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG)
+                closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG, sendMsgForThisClient = false)
                 break
             }
             // Проверка корректности пакета
@@ -139,7 +148,7 @@ class TCPServer(
                     } else
                         closeClientsSocket(socket, ServersMsg.ERROR_FILE_DATA)
                 }
-                Command.CLOSE -> closeClientsSocket(socket, ServersMsg.CLOSE_FROM_CLIENT)
+                Command.CLOSE -> closeClientsSocket(socket, ServersMsg.CLOSE_FROM_CLIENT, false)
                 Command.AUTH -> closeClientsSocket(socket, ServersMsg.ERROR_REPEAT_AUTH)
             }
         }
@@ -175,9 +184,9 @@ class TCPServer(
 
         clients[socket]?.second?.interrupt()
         socket.close()
-        clients.remove(socket)
         if (log)
             println("[${getTimeStr()}] Client ${socket.inetAddress}:${clients[socket]?.first} removed from chat. Reason: ${reason.name}. ${reason.message}")
+        clients.remove(socket)
     }
 
     /** Проверка корректности пакета (доверие клиенту??):

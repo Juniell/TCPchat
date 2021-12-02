@@ -218,7 +218,13 @@ class TCPClient(
         msgB.addAll(dataB.toList())
 
         val out = socketServer.getOutputStream()
-        out.write(msgB.toByteArray())
+        try {
+            out.write(msgB.toByteArray())
+        } catch (e: IOException) {
+            // Если поймали исключение, значит сервер не доступен
+            stopRead()
+            exit("Сервер не доступен.", false)
+        }
     }
 
     private fun getMsg(): Msg {
