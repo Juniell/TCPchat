@@ -51,8 +51,8 @@ class TCPServer(
             return
         }
 
-        // Если получен пакет типа AUTH и username не занят
-        if (msg.command == Command.AUTH && checkUsernames(msg.username)) {
+        // Если получен пакет типа AUTH, username не занят и у пользователя корректное время
+        if (msg.command == Command.AUTH && checkUsernames(msg.username) && System.currentTimeMillis() / 1000L - msg.time <= 30) {
             sendMsg(socket, Command.AUTH, serverName, ServersMsg.OK.message)  // Отправляем OK
             val readClientThread = Thread { readClientsMsg(socket) }    // Создаём поток на чтение
             clients[socket] = msg.username to readClientThread   // Добавляем в список клиентов, запоминаем ник и поток
@@ -188,7 +188,7 @@ class TCPServer(
     private fun checkMsg(socket: Socket, msg: Msg): ServersMsg {
         if (msg.username != clients[socket]?.first)
             return ServersMsg.ERROR_USERNAME
-        if (System.currentTimeMillis() / 1000L - msg.time >= 30)
+        if (System.currentTimeMillis() / 1000L - msg.time > 30)
             return ServersMsg.ERROR_TIME
         if ((msg.command == Command.SEND_MSG || msg.command == Command.SEND_FILE) && msg.data.isEmpty())
             return ServersMsg.ERROR_DATA_EMPTY

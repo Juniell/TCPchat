@@ -48,6 +48,7 @@ class TCPClient(
                     readThread = Thread { readChat() }
                 } catch (e: ConnectException) {
                     println("Сервер не отвечает.")
+                    socketServer.close()
                     exitProcess(0)
                 }
 
@@ -64,8 +65,8 @@ class TCPClient(
                     } else  // Если не получилось авторизоваться
                         exit(ans.data, tellToServer = false)      // отключаемся по указанной от сервера причине
                 } catch (e: IOException) {
-                    stopRead()
-                    exit(e.message ?: "Сервер не отвечает")      // отключаемся по указанной от сервера причине
+                    // отключаемся, т.к. не удалось считать сообщение от сервера
+                    exit(e.message ?: "Сервер не отвечает.", tellToServer = false)
                 }
             }
         }
@@ -96,7 +97,7 @@ class TCPClient(
                 msg = getMsg()
             } catch (e: IOException) {
                 stopRead()
-                exit(e.message ?: "Сервер не отвечает")
+                exit(e.message ?: "Сервер не отвечает", tellToServer = false)
                 return
             }
             when (msg.command) {
@@ -169,7 +170,7 @@ class TCPClient(
                         }
                         "--exit" -> {
                             stopRead()
-                            exit(tellToServer = true)
+                            exit("Отключение командой --exit", tellToServer = true)
                         }
                         else -> sendMsg(Command.SEND_MSG, msg)
                     }
@@ -178,7 +179,6 @@ class TCPClient(
             }
         }
     }
-
 
     private fun sendMsg(
         command: Command,
@@ -220,7 +220,6 @@ class TCPClient(
         val out = socketServer.getOutputStream()
         out.write(msgB.toByteArray())
     }
-
 
     private fun getMsg(): Msg {
         val input = socketServer.getInputStream()
@@ -281,7 +280,7 @@ class TCPClient(
 
 
     private fun getTimeStr(l: Long = System.currentTimeMillis() / 1000L): String? {
-        val sdf = SimpleDateFormat("HH-mm")
+        val sdf = SimpleDateFormat("HH:mm")
         val date = Date(l * 1000)
         return sdf.format(date)
     }
