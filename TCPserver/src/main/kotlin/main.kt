@@ -7,9 +7,6 @@ class Launcher {
     @Option(name = "-p", usage = "port")
     private var port = 8888
 
-    @Option(name = "-n", usage = "serverName")
-    private var serverName = "__Server__"
-
     @Option(name = "-l", usage = "log")
     private var log = true
 
@@ -23,11 +20,11 @@ class Launcher {
             parser.parseArgument(*args)
         } catch (e: CmdLineException) {
             System.err.println(e.message)
-            System.err.println("java -jar TCPServer.jar [-p port] [-n serverName] [-l log] [-r readBufferSize]")
+            System.err.println("java -jar TCPServer.jar [-p port] [-l log] [-r readBufferSize]")
             parser.printUsage(System.err)
         }
         try {
-            TCPServer(port, serverName, log, readBufferSize)
+            TCPServer(port, log, readBufferSize)
         } catch (e: Exception) {
             System.err.println(e.message)
         }

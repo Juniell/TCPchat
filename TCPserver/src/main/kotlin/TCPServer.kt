@@ -1,87 +1,65 @@
 import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.system.exitProcess
 
 class TCPServer(
     port: Int = 8888,
-    private var serverName: String = "__Server__",  // username "__Server__" зарезервирован под сервер
     private val log: Boolean = true,
-    private val readBufferSize: Int = 5 * 1024      // Размер буфера для чтения (по сколько будем читать)
+    private val readBufferSize: Int = 128 * 1024      // Размер буфера для чтения (по сколько будем читать)
 ) {
+    private var serverName: String = "__Server__"     // username "__Server__" зарезервирован под сервер
     private var socketServer = ServerSocket(port)
-    private val clients = mutableMapOf<Socket, Pair<String, Thread>>()  // сокет, username и поток на чтение клиента
+    private val clients =
+        ConcurrentHashMap<Socket, Pair<String, Thread>>()  // сокет, username и поток на чтение клиента
     private var exit = false
     private var acceptThread: Thread
 
     init {
-        println("[${getTimeStr(System.currentTimeMillis() / 1000L)}] Сервер запущен на порту ${socketServer.localPort}")
+        println("[${getTimeStr()}] Server started on port ${socketServer.localPort}")
         acceptThread = Thread { accept() }
         acceptThread.start()    // поток на подключение клиентов
         readConsole()           // поток на чтение консоли
-    }
-
-    private fun exit() {
-        exit = true
-        acceptThread.interrupt()            // Останавливаем поток на подключение клиентов
-        for (client in clients.values) {    // Останавливаем потоки на чтение клиентов
-            client.second.interrupt()
-        }
-        // Закрываем сокеты клиентов и сообщаем им об этом
-        println("\n[${getTimeStr()}] Отключение клиентов.")
-        while (clients.isNotEmpty()) {
-            val socket = clients.keys.last()
-            closeClientsSocket(socket, ServersMsg.CLOSE_SERVER)
-        }
-        // Завершаем программу
-        println("\n[${getTimeStr()}] Завершение работы программы.")
-        exitProcess(0)
-    }
-
-    private fun readConsole() {
-        val read = readLine()?.trim()
-        // Если null -> EOF -> выход сочетанием клавиш
-        if (read == null || read.startsWith("--stop")) {
-            println("\n[${getTimeStr()}] Получена команда завершения сервера.")
-            exit()
-        }
     }
 
     private fun accept() {
         while (!exit) {
             val socketClient = socketServer.accept()
             if (log)
-                println("[${getTimeStr(System.currentTimeMillis() / 1000L)}] Ко мне подключился: ${socketClient.inetAddress}")
+                println("[${getTimeStr()}] Connected to me: ${socketClient.inetAddress}")
             // Запускам поток на авторизацию клиента
             Thread { checkAuth(socketClient) }.start()
         }
         Thread.currentThread().interrupt()
     }
 
-    private fun checkUsernames(username: String): Boolean {
-        if (username.lowercase() == serverName.lowercase())
-            return false
-        for (client in clients.values)
-            if (username == client.first)
-                return false
-        return true
-    }
-
     /** Производит авторизацию пользователя.
-     *  Закрывает соединение с сокетом при неуспешной авторизации. **/
+     *  Закрывает соединение с сокетом сервера при неуспешной авторизации. **/
     private fun checkAuth(socket: Socket) {
-        val msg = getMsg(socket)        // Ждём сообщение от клиента
+        val msg: Msg?
+        try {
+            msg = getMsg(socket)        // Ждём сообщение от клиента
+        } catch (e: IOException) {
+            socket.close()  // Закрываем соединение
+            if (log)
+                println("[${getTimeStr()}] Client rejected: ${socket.inetAddress}")
+            Thread.currentThread().interrupt()
+            return
+        }
+
         // Если получен пакет типа AUTH и username не занят
-        if (msg != null && msg.command == Command.AUTH && checkUsernames(msg.username)) {
+        if (msg.command == Command.AUTH && checkUsernames(msg.username)) {
             sendMsg(socket, Command.AUTH, serverName, ServersMsg.OK.message)  // Отправляем OK
             val readClientThread = Thread { readClientsMsg(socket) }    // Создаём поток на чтение
             clients[socket] = msg.username to readClientThread   // Добавляем в список клиентов, запоминаем ник и поток
             readClientThread.start()    // Запускаем поток на чтение сокета
 
             if (log)
-                println("[${getTimeStr(System.currentTimeMillis() / 1000L)}] Клиент авторизирован: ${socket.inetAddress} - ${msg.username}")
+                println("[${getTimeStr()}] Client authorized: ${socket.inetAddress} - ${msg.username}")
 
             // Отправляем всем пользователям, что подключился новый
             sendMsgForAll(
@@ -95,15 +73,56 @@ class TCPServer(
             sendMsg(socket, Command.AUTH, serverName, ServersMsg.AUTH_USERNAME_INVALID.message)
             socket.close()  // Закрываем соединение
             if (log)
-                println("[${getTimeStr(System.currentTimeMillis() / 1000L)}] Клиент отклонён: ${socket.inetAddress}")
+                println("[${getTimeStr()}] Client rejected: ${socket.inetAddress}")
         }
         Thread.currentThread().interrupt()
+    }
+
+    private fun readConsole() {
+        val read = readLine()?.trim()
+        // Если null -> EOF -> выход сочетанием клавиш
+        if (read == null || read.startsWith("--stop")) {
+            println("\n[${getTimeStr()}] Server shutdown command received.")
+            exit()
+        }
+    }
+
+    private fun exit() {
+        exit = true
+        acceptThread.interrupt()            // Останавливаем поток на подключение клиентов
+        for (client in clients.values) {    // Останавливаем потоки на чтение клиентов
+            client.second.interrupt()
+        }
+        // Закрываем сокеты клиентов и сообщаем им об этом
+        println("\n[${getTimeStr()}] Disconnecting clients.")
+        while (clients.isNotEmpty()) {
+            val socket = clients.keys.last()
+            closeClientsSocket(socket, ServersMsg.CLOSE_SERVER)
+        }
+        // Завершаем программу
+        println("\n[${getTimeStr()}] Termination of the program.")
+        exitProcess(0)
+    }
+
+    private fun checkUsernames(username: String): Boolean {
+        if (username.lowercase() == serverName.lowercase())
+            return false
+        for (client in clients.values)
+            if (username == client.first)
+                return false
+        return true
     }
 
     private fun readClientsMsg(socket: Socket) {
         while (clients.containsKey(socket) && !exit) {  // Пока у нас есть общение с этим сокетом
             // Попытка получения сообщения
-            val msg = getMsg(socket) ?: break
+            var msg: Msg?
+            try {
+                msg = getMsg(socket)
+            } catch (e: IOException) {
+                closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG)
+                break
+            }
             // Проверка корректности пакета
             val checkMsg = checkMsg(socket, msg)
             if (checkMsg != ServersMsg.OK) {
@@ -118,7 +137,7 @@ class TCPServer(
                         sendMsgForAll(Command.SEND_MSG, serverName, msg.time, "${msg.username} отправил файл.")
                         sendMsgForAll(msg, exceptSocket = socket)
                     } else
-                        closeClientsSocket(socket, ServersMsg.ERROR_FILE_)
+                        closeClientsSocket(socket, ServersMsg.ERROR_FILE_DATA)
                 }
                 Command.CLOSE -> closeClientsSocket(socket, ServersMsg.CLOSE_FROM_CLIENT)
                 Command.AUTH -> closeClientsSocket(socket, ServersMsg.ERROR_REPEAT_AUTH)
@@ -127,8 +146,9 @@ class TCPServer(
         Thread.currentThread().interrupt()
     }
 
-    //проверить, что есть название файла и байты файла
     private fun checkSendFileMsg(msg: Msg): Boolean {
+        if (msg.data.size > 16777215)
+            return false
         val data = msg.data
         for (i in 0 until data.size - 1)
             if (data[i] == 0.toByte() && data[i + 1] == 0.toByte() && i != data.indices.first && i + 1 != data.indices.last)
@@ -152,11 +172,12 @@ class TCPServer(
             "Пользователь ${clients[socket]?.first} вышел из чата!",
             exceptSocket = socket
         )
-        if (log)
-            println("[${getTimeStr(System.currentTimeMillis() / 1000L)}] Пользователь ${socket.inetAddress}:${clients[socket]?.first} удалён из чата. Причина: ${reason.name}. ${reason.message}")
+
         clients[socket]?.second?.interrupt()
         socket.close()
         clients.remove(socket)
+        if (log)
+            println("[${getTimeStr()}] Client ${socket.inetAddress}:${clients[socket]?.first} removed from chat. Reason: ${reason.name}. ${reason.message}")
     }
 
     /** Проверка корректности пакета (доверие клиенту??):
@@ -229,12 +250,12 @@ class TCPServer(
 
         // Проверка на максимальный размер data
         if (dataLen > 16777215)
-            throw IllegalArgumentException("Поле data содержит более 16 777 215 байт.")
+            throw IllegalArgumentException("The data field contains more than 16,777,215 bytes.")
 
         // Проверка корректной размерности полей
         val command = commandB.toUByte().toInt()
         if (command < 0 || command > 3 || usernameB.size != 10 || timeB.size != 4)
-            throw IllegalArgumentException("Переданы данные некорректного размера для отправки.")
+            throw IllegalArgumentException("The data sent was of the wrong size for sending.")
 
         // Формирование сообщения
         msgB.add(commandB)               // 1 байт: command (1 байт)
@@ -253,7 +274,7 @@ class TCPServer(
             out.write(msgB.toByteArray())
             if (log)
                 if (command == Command.SEND_FILE.value)
-                    println("[${getTimeStr()}] <$serverName to ${socket.inetAddress}:${clients[socket]?.first}>: *Отправляю файл*")
+                    println("[${getTimeStr()}] <$serverName to ${socket.inetAddress}:${clients[socket]?.first}>: *Sending the file.*")
                 else
                     println(
                         "[${getTimeStr()}] <$serverName to ${socket.inetAddress}:${clients[socket]?.first}>: ${
@@ -270,22 +291,17 @@ class TCPServer(
         }
     }
 
-
-    private fun getMsg(socket: Socket): Msg? {
+    private fun getMsg(socket: Socket): Msg {
         val input = socket.getInputStream()
 
         if (exit)
-            return null
+            throw IOException(ServersMsg.CLOSE_SERVER.message)
 
         /** Чтение первых 18 байтов **/
         val bytes = ByteArray(18)
-        try {
-            input.read(bytes, 0, 18)
-        } catch (e: IOException) {
-            // Если поймали исключение, значит пользователь отключился, поэтому отключаемся от него
-            closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG, false)
-            return null
-        }
+        val read = input.read(bytes, 0, 18)
+        if (read == -1)
+            throw SocketException(ServersMsg.ERROR_GET_MSG.message)
 
         /** 1 байт: command **/
         val command = when (bytes[0].toUByte().toInt()) {   // Получаем код команды
@@ -312,34 +328,28 @@ class TCPServer(
 
         /** 19 и следующие dataLen байты: data **/
         val dataB = mutableListOf<Byte>()
-        try {
-            var readied = 0
-            while (readied != dataLen) {
-                val residue = dataLen - readied
-                if (residue < readBufferSize) {  // если осталось считать меньше 5 килобайт
-                    val bytesData = ByteArray(residue)
-                    val read = input.read(bytesData, 0, residue)
-                    readied += read
-                    dataB.addAll(bytesData.toList())
-                } else {
-                    val bytesData = ByteArray(readBufferSize)
-                    val read = input.read(bytesData, 0, readBufferSize)
-                    readied += read
-                    dataB.addAll(bytesData.toList())
-                }
-            }
 
-        } catch (e: IOException) {
-            // Если поймали исключение, значит пользователь отключился, поэтому отключаемся от него
-            closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG, false)
-            return null
+        var readied = 0
+        while (readied != dataLen) {
+            val residue = dataLen - readied
+
+            val needReed = if (residue < readBufferSize) residue else readBufferSize
+
+            var bytesData = ByteArray(needReed)
+            val readData = input.read(bytesData, 0, needReed)
+            if (readData == -1)
+                throw SocketException("Сервер не отвечает.")
+            if (readData < needReed)
+                bytesData = bytesData.dropLast(needReed - readData).toByteArray()
+            readied += bytesData.size
+            dataB.addAll(bytesData.toList())
         }
 
         val data = dataB.toByteArray().toString(Charsets.UTF_8)
 
         if (log)
             if (command == Command.SEND_FILE)
-                println("[${getTimeStr()}] <${socket.inetAddress}:${clients[socket]?.first} to $serverName>: *Отправляю файл*")
+                println("[${getTimeStr()}] <${socket.inetAddress}:${clients[socket]?.first} to $serverName>: *Sending the file.*")
             else
                 println("[${getTimeStr()}] <${socket.inetAddress}:${clients[socket]?.first} to $serverName>: $data")
 
@@ -374,7 +384,7 @@ enum class ServersMsg(val message: String) {
     AUTH_USERNAME_INVALID("Username already exists or invalid."),
     ERROR_USERNAME("The username in the received package does not match the authorization username."),
     ERROR_SEND_MSG("Exception while sending package."),
-    ERROR_FILE_("Error in the data field when sending a file (file name or bytes are missing)."),
+    ERROR_FILE_DATA("Error in the data field when sending a file (file name or bytes are missing)."),
     ERROR_GET_MSG("Exception when receiving package."),
     ERROR_TIME("Incorrect time in the received packet."),
     ERROR_DATA_EMPTY("For a message or file sending packet, the \"data\" field should not be empty."),

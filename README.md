@@ -1,8 +1,8 @@
 # Формат протокола:
 
-| command  | dataLength | username |   time  |         data         |
-| :------: | :--------: | :------: | :-----: | :------------------: |
-|  1 byte  |   3 bytes  | 10 bytes | 4 bytes | 0 - 16 777 215 bytes |
+| command | dataLength | username |  time   |         data         |
+|:-------:|:----------:|:--------:|:-------:|:--------------------:|
+| 1 byte  |  3 bytes   | 10 bytes | 4 bytes | 0 - 16 777 215 bytes |
 
 ## command:
 - `00` - отправка сообщения с содержимым `data`,

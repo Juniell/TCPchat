@@ -4,29 +4,24 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.InetAddress
 import java.net.Socket
+import java.net.SocketException
 import java.nio.file.Paths
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.system.exitProcess
 
 class TCPClient(
-    port: Int = 8888,
-    inetAddress: InetAddress = InetAddress.getLocalHost(),
-    private val readBufferSize: Int = 5 * 1024          // Размер буфера для чтения (по сколько будем читать)
+    private val port: Int = 8888,
+    private val inetAddress: InetAddress = InetAddress.getLocalHost(),
+    private val readBufferSize: Int = 128 * 1024          // Размер буфера для чтения (по сколько будем читать)
 ) {
     private lateinit var socketServer: Socket
-    private lateinit var username: String
-    private lateinit var serverName: String
+    private var username = ""
+    private var serverName = ""
     private lateinit var readThread: Thread
 
     init {
-        try {
-            socketServer = Socket(inetAddress, port)
-            println("\tЯ подключился")
-            login()
-        } catch (e: ConnectException) {
-            println("Сервер не отвечает.")
-        }
+        login()
     }
 
     /** Метод авторизации клиента.**/
@@ -34,41 +29,62 @@ class TCPClient(
         println("Введите имя пользователя:")
         val username = readLine()?.trim()
         when {
-            username.isNullOrEmpty() -> {
+            username == null -> {
+                exit("Отключение сочетанием клавиш Ctrl+D", tellToServer = false)
+                return
+            }
+            username.isEmpty() -> {
                 println("Неверное имя пользователя.")
                 login()
             }
-            username.length > 10 -> {
+            username.length > 10 || username.toByteArray().size > 10 -> {
                 println("Имя пользователя должно быть меньше 10 символов.")
                 login()
             }
             else -> {
+                try {
+                    socketServer = Socket(inetAddress, port)
+                    println("Я подключился к серверу.")
+                    readThread = Thread { readChat() }
+                } catch (e: ConnectException) {
+                    println("Сервер не отвечает.")
+                    exitProcess(0)
+                }
+
                 println("Попытка авторизации.")
                 sendMsg(Command.AUTH, "", username = username.trim())
-                val ans = getMsg()
+                try {
+                    val ans = getMsg()
 
-                if (ans.command == Command.AUTH && ans.data == "OK") {  // Если получилось авторизоваться
-                    this.username = username.trim()  // запоминаем свой username
-                    this.serverName = ans.username   // запоминаем username сервера
-                    readThread = Thread { readChat() }
-                    readThread.start()              // запускам поток на чтение сообщений
-                    writeToChat()                   // читаем консоль
-                } else  // Если не получилось авторизоваться
-                    exit(ans.data)      // отключаемся по указанной от сервера причине
+                    if (ans.command == Command.AUTH && ans.data == "OK") {  // Если получилось авторизоваться
+                        this.username = username.trim()  // запоминаем свой username
+                        this.serverName = ans.username   // запоминаем username сервера
+                        readThread.start()               // запускам поток на чтение сообщений
+                        writeToChat()                    // читаем консоль
+                    } else  // Если не получилось авторизоваться
+                        exit(ans.data, tellToServer = false)      // отключаемся по указанной от сервера причине
+                } catch (e: IOException) {
+                    stopRead()
+                    exit(e.message ?: "Сервер не отвечает")      // отключаемся по указанной от сервера причине
+                }
             }
         }
     }
 
+    private fun stopRead() {
+        if (this::readThread.isInitialized && !readThread.isInterrupted)
+            readThread.interrupt()
+    }
+
     /** Отключение от сервера и закрытие приложения **/
     private fun exit(reason: String = "", tellToServer: Boolean = false) {
-        if (!readThread.isInterrupted)
-            readThread.interrupt()
         println("Выход")
         if (reason.isNotEmpty())
             println("Причина: $reason")
         if (tellToServer)
             sendMsg(Command.CLOSE, "")
-        socketServer.close()
+        if (this::socketServer.isInitialized)
+            socketServer.close()
         exitProcess(0)
     }
 
@@ -79,17 +95,18 @@ class TCPClient(
             try {
                 msg = getMsg()
             } catch (e: IOException) {
-                exit("Сервер не отвечает")
+                stopRead()
+                exit(e.message ?: "Сервер не отвечает")
                 return
             }
             when (msg.command) {
                 Command.CLOSE -> if (msg.username == serverName) {
-                    readThread.interrupt()
+                    stopRead()
                     exit(msg.data, false)
                 }
                 Command.SEND_MSG -> println("[${msg.time}] ${msg.username}:\t${msg.data}")
                 Command.SEND_FILE -> saveFile(msg)
-                Command.AUTH -> {}  // не должно быть
+                Command.AUTH -> {}  // не должно быть - скипаем
             }
         }
     }
@@ -120,6 +137,7 @@ class TCPClient(
 
             // Если null -> EOF -> выход сочетанием клавиш
             if (msg == null) {
+                stopRead()
                 exit("Отключение сочетанием клавиш Ctrl+D", tellToServer = true)
                 return
             }
@@ -149,7 +167,10 @@ class TCPClient(
                                 println("[${getTimeStr()}] Указан неверный путь до файла.")
                             }
                         }
-                        "--exit" -> exit(tellToServer = true)
+                        "--exit" -> {
+                            stopRead()
+                            exit(tellToServer = true)
+                        }
                         else -> sendMsg(Command.SEND_MSG, msg)
                     }
                 else
@@ -173,7 +194,7 @@ class TCPClient(
 
         /** Формирование 2-4 байтов: dataLen (3 байта) **/
         val dataB = if (fileBytes.isEmpty())
-            data.trim().toByteArray()
+            data.trim().toByteArray(Charsets.UTF_8)
         else
             fileBytes
 
@@ -182,7 +203,7 @@ class TCPClient(
             msgB.add((dataLength ushr 8 * i).toByte())
 
         /** Формирование 5-14 байтов: username **/
-        val usernameB = username.trim().toByteArray()
+        val usernameB = username.trim().toByteArray(Charsets.UTF_8)
         if (usernameB.size < 10)
             for (i in 1..(10 - usernameB.size))
                 msgB.add(0)
@@ -206,7 +227,9 @@ class TCPClient(
 
         /** Чтение первых 18 байтов **/
         val bytes = ByteArray(18)
-        input.read(bytes, 0, 18)
+        val read = input.read(bytes, 0, 18)
+        if (read == -1)
+            throw SocketException("Сервер не отвечает.")
 
         /** 1 байт: command **/
         val command = when (bytes[0].toUByte().toInt()) {   // Получаем код команды
@@ -238,17 +261,17 @@ class TCPClient(
         var readied = 0
         while (readied != dataLen) {
             val residue = dataLen - readied
-            if (residue <= readBufferSize) {  // если осталось считать не больше 5 килобайт
-                val bytesData = ByteArray(residue)
-                val read = input.read(bytesData, 0, residue)
-                readied += read
-                dataB.addAll(bytesData.toList())
-            } else {
-                val bytesData = ByteArray(5 * 1024)
-                val read = input.read(bytesData, 0, readBufferSize)
-                readied += read
-                dataB.addAll(bytesData.toList())
-            }
+
+            val needReed = if (residue < readBufferSize) residue else readBufferSize
+
+            var bytesData = ByteArray(needReed)
+            val readData = input.read(bytesData, 0, needReed)
+            if (readData == -1)
+                throw SocketException("Сервер не отвечает.")
+            if (readData < needReed)
+                bytesData = bytesData.dropLast(needReed - readData).toByteArray()
+            readied += readData
+            dataB.addAll(bytesData.toList())
         }
 
         val data = dataB.toByteArray().toString(Charsets.UTF_8)
