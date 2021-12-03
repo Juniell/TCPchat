@@ -19,6 +19,7 @@ class TCPClient(
     private var username = ""
     private var serverName = ""
     private lateinit var readThread: Thread
+    private var exit = false
 
     init {
         login()
@@ -79,6 +80,9 @@ class TCPClient(
 
     /** Отключение от сервера и закрытие приложения **/
     private fun exit(reason: String = "", tellToServer: Boolean = false) {
+        if (exit)
+            return
+        exit = true
         println("Выход")
         if (reason.isNotEmpty())
             println("Причина: $reason")
@@ -91,7 +95,7 @@ class TCPClient(
 
     /** Чтение сообщений от сервера и их обработка. **/
     private fun readChat() {
-        while (true) {
+        while (!exit) {
             val msg: Msg
             try {
                 msg = getMsg()
@@ -133,7 +137,7 @@ class TCPClient(
 
     /** Чтение консоли и выполнение команд или отправка соответствующих сообщений. **/
     private fun writeToChat() {
-        while (true) {
+        while (!exit) {
             val msg = readLine()?.trim()
 
             // Если null -> EOF -> выход сочетанием клавиш
