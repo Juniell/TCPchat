@@ -217,7 +217,7 @@ class TCPServer(
         if (clients.isNotEmpty())
             for (socket in clients.keys)
                 if (socket != exceptSocket)
-                    sendMsg(socket, command, username, data.toByteArray(), time)
+                    sendMsg(socket, command, username, data.toByteArray(Charsets.UTF_8), time)
     }
 
     /** Отправляет заданное сообщение всем кроме exceptSocket. **/
@@ -236,7 +236,7 @@ class TCPServer(
 
     private fun sendMsg(socket: Socket, command: Command, username: String, dataB: ByteArray, timeConst: Long = -1L) {
         val commandB = command.value.toByte()
-        val unB = username.trim().toByteArray()
+        val unB = username.trim().toByteArray(Charsets.UTF_8)
         val usernameB = mutableListOf<Byte>()
         if (unB.size < 10)
             for (i in 1..(10 - unB.size))
@@ -251,7 +251,7 @@ class TCPServer(
     }
 
     private fun sendMsg(socket: Socket, command: Command, username: String, data: String, timeConst: Long = -1L) =
-        sendMsg(socket, command, username, data.toByteArray(), timeConst)
+        sendMsg(socket, command, username, data.toByteArray(Charsets.UTF_8), timeConst)
 
     private fun sendMsg(socket: Socket, commandB: Byte, usernameB: ByteArray, timeB: ByteArray, dataB: ByteArray) {
         val msgB = mutableListOf<Byte>()
@@ -354,7 +354,12 @@ class TCPServer(
             dataB.addAll(bytesData.toList())
         }
 
-        val data = dataB.toByteArray().toString(Charsets.UTF_8)
+//        val data = dataB.toByteArray().toString(Charsets.UTF_8)
+
+        val data = if (command == Command.SEND_FILE)
+            ""
+        else
+            dataB.toByteArray().toString(Charsets.UTF_8)
 
         if (log)
             if (command == Command.SEND_FILE)

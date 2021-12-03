@@ -67,7 +67,7 @@ class TCPClient(
                         exit(ans.data, tellToServer = false)      // отключаемся по указанной от сервера причине
                 } catch (e: IOException) {
                     // отключаемся, т.к. не удалось считать сообщение от сервера
-                    exit(e.message ?: "Сервер не отвечает.", tellToServer = false)
+                    exit("Сервер не отвечает.", tellToServer = false)
                 }
             }
         }
@@ -270,7 +270,6 @@ class TCPClient(
         var readied = 0
         while (readied != dataLen) {
             val residue = dataLen - readied
-
             val needReed = if (residue < readBufferSize) residue else readBufferSize
 
             var bytesData = ByteArray(needReed)
@@ -283,7 +282,10 @@ class TCPClient(
             dataB.addAll(bytesData.toList())
         }
 
-        val data = dataB.toByteArray().toString(Charsets.UTF_8)
+        val data = if (command == Command.SEND_FILE)
+            ""
+        else
+            dataB.toByteArray().toString(Charsets.UTF_8)
 
         return Msg(command, username, time, data, dataB)
     }
