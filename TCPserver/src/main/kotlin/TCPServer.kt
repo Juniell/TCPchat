@@ -129,7 +129,8 @@ class TCPServer(
             try {
                 msg = getMsg(socket)
             } catch (e: IOException) {
-                closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG, sendMsgForThisClient = false)
+                if (!exit)
+                    closeClientsSocket(socket, ServersMsg.ERROR_GET_MSG, sendMsgForThisClient = false)
                 break
             }
             // Проверка корректности пакета
