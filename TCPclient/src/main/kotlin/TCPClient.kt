@@ -16,7 +16,7 @@ class TCPClient(
     private lateinit var socketServer: SocketChannel
     private var username = ""
     private var serverName = ""
-    private lateinit var readThread: Thread
+    private val readThread = Thread { readChat() }
     private var exit = false
 
     init {
@@ -42,9 +42,8 @@ class TCPClient(
             }
             else -> {
                 try {
-                    socketServer = SocketChannel.open(InetSocketAddress("localhost", port))
+                    socketServer = SocketChannel.open(InetSocketAddress(inetAddress, port))
                     println("Я подключился к серверу.")
-                    readThread = Thread { readChat() }
                 } catch (e: ConnectException) {
                     println("Сервер не отвечает.")
                     socketServer.close()
@@ -64,17 +63,15 @@ class TCPClient(
                     } else  // Если не получилось авторизоваться
                         exit(ans.data, tellToServer = false)      // отключаемся по указанной от сервера причине
                 } catch (e: IOException) {
-                    // отключаемся, т.к. не удалось считать сообщение от сервера
+                    // Отключаемся, т.к. не удалось считать сообщение от сервера
                     exit("Сервер не отвечает.", tellToServer = false)
                 }
             }
         }
     }
 
-
-
     private fun stopRead() {
-        if (this::readThread.isInitialized && !readThread.isInterrupted)
+        if (!readThread.isInterrupted)
             readThread.interrupt()
     }
 
@@ -110,7 +107,7 @@ class TCPClient(
                     exit(msg.data, false)
                 }
                 Command.SEND_MSG -> println("[${getTimeStr(msg.time)}] ${msg.username}:\t${msg.data}")
-                Command.SEND_FILE -> saveFile(msg)
+                Command.SEND_FILE -> Thread { saveFile(msg) }.start()
                 Command.AUTH -> {}  // не должно быть - скипаем
             }
         }
@@ -126,13 +123,17 @@ class TCPClient(
                 try {
                     val path = Paths.get("").toAbsolutePath()
                         .toString() + File.separator + fileName
-                    File(path).writeBytes(fileData.toByteArray())
+                    File(path).apply {
+                        createNewFile()
+                        writeBytes(fileData.toByteArray())
+                    }
                     println("[${getTimeStr()}] Скачен файл пользователя ${msg.username}: $path")
                 } catch (e: Exception) {
                     println("[${getTimeStr()}] Не удалось скачать файл, который отправил ${msg.username}")
                 }
                 return
             }
+        Thread.currentThread().interrupt()
     }
 
     /** Чтение консоли и выполнение команд или отправка соответствующих сообщений. **/
@@ -189,9 +190,22 @@ class TCPClient(
             data.trim().toByteArray(Charsets.UTF_8)
         else
             fileBytes
-        sendMsg(socketServer, command, username, dataB)
+        try {
+            sendMsg(socketServer, command, username, dataB)
+        } catch (e: IllegalArgumentException) {
+            println("Сообщение не было отправлено. Некорректное сообщение: ${e.message}")
+        } catch (e: IOException) {  // если сервер недоступен
+            stopRead()
+            exit(e.message ?: "Сервер не отвечает", tellToServer = false)
+            return
+        }
     }
 
-    private fun getMsg(): Msg = getMsg(socketServer)
+    private fun getMsg(): Msg {
+        var msg = getMsg(socketServer)
+        while (msg.isEmpty())
+            msg = getMsg(socketServer)
+        return msg
+    }
 
 }

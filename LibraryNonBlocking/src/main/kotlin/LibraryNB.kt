@@ -1,4 +1,3 @@
-import java.lang.Thread.sleep
 import java.net.SocketException
 import java.nio.ByteBuffer
 import java.nio.channels.SocketChannel
@@ -15,7 +14,14 @@ data class Msg(
     val timeB: List<Byte>,
     val data: String,
     val dataB: List<Byte>
-)
+) {
+    fun isEmpty(): Boolean = command.value == 0 && username.isEmpty() && usernameB.isEmpty() && time == 0L &&
+            timeB.isEmpty() && data.isEmpty() && dataB.isEmpty()
+
+    fun isNotEmpty(): Boolean = !isEmpty()
+}
+
+private fun emptyMsg(): Msg = Msg(Command.SEND_MSG, "", listOf(), 0L, listOf(), "", listOf())
 
 enum class Command(val value: Int) {
     SEND_MSG(0),
@@ -27,74 +33,73 @@ enum class Command(val value: Int) {
 /** Получение сообщения от указанного сокета.
  * Выбрасывает SocketException, если не удалось считать из socket (т.е. он закрыт).**/
 fun getMsg(socket: SocketChannel): Msg {
-    while (true) {
-        /** Чтение первых 18 байтов **/
-        val buffer = ByteBuffer.allocate(18)
-        buffer.clear()
-        val read = socket.read(buffer)
-//        println("read $read bytes")
-        if (read == 0) { // Пока ничего нет
-            sleep(500)
+    /** Чтение первых 18 байтов **/
+    val buffer = ByteBuffer.allocate(18)
+    buffer.clear()
+    val read = socket.read(buffer)
+
+    if (read == 0)          // Пока ничего нет
+        return emptyMsg()
+    if (read == -1)
+        throw SocketException("Exception when receiving package.")
+    val bytes = buffer.array()
+
+    /** 1 байт: command **/
+    val command = when (bytes[0].toUByte().toInt()) {   // Получаем код команды
+        0 -> Command.SEND_MSG
+        1 -> Command.SEND_FILE
+        2 -> Command.AUTH
+        else -> Command.CLOSE
+    }
+
+    /** 2-4 байты: dataLen **/
+    var dataLen = bytes[1].toUByte().toInt()
+    for (i in 2..3)
+        dataLen = (dataLen shl 8).or(bytes[i].toUByte().toInt())
+
+    /** 5-14 байты: username **/
+    val usernameB = bytes.slice(4..13)
+    val username = usernameB.dropWhile { it == 0.toByte() }.toByteArray().toString(Charsets.UTF_8)
+
+    /** 15-18 байты: time **/
+    val timeB = bytes.slice(14..17)
+    var timeI = timeB[0].toUByte().toInt()
+    for (i in 1..3)
+        timeI = (timeI shl 8).or(timeB[i].toUByte().toInt())
+
+    /** 19 и следующие dataLen байты: data **/
+    val dataB = mutableListOf<Byte>()
+    var readied = 0
+    buffer.flip()
+
+    while (readied != dataLen) {
+        val residue = dataLen - readied
+        val needReed = if (residue < readBufferSize) residue else readBufferSize
+
+        val bufferData = ByteBuffer.allocate(needReed)
+        val readData = socket.read(bufferData)
+
+        if (readData == 0) {
+            println("[стр 80, Library] readData == 0")
             continue
         }
-        if (read == -1)
+        if (readData == -1)
             throw SocketException("Exception when receiving package.")
-        val bytes = buffer.array()
+        var bytesData = bufferData.array()
 
-        /** 1 байт: command **/
-        val command = when (bytes[0].toUByte().toInt()) {   // Получаем код команды
-            0 -> Command.SEND_MSG
-            1 -> Command.SEND_FILE
-            2 -> Command.AUTH
-            else -> Command.CLOSE
-        }
-
-        /** 2-4 байты: dataLen **/
-        var dataLen = bytes[1].toUByte().toInt()
-        for (i in 2..3)
-            dataLen = (dataLen shl 8).or(bytes[i].toUByte().toInt())
-
-        /** 5-14 байты: username **/
-        val usernameB = bytes.slice(4..13)
-        val username = usernameB.dropWhile { it == 0.toByte() }.toByteArray().toString(Charsets.UTF_8)
-
-        /** 15-18 байты: time **/
-        val timeB = bytes.slice(14..17)
-        var timeI = timeB[0].toUByte().toInt()
-        for (i in 1..3)
-            timeI = (timeI shl 8).or(timeB[i].toUByte().toInt())
-
-        /** 19 и следующие dataLen байты: data **/
-        val dataB = mutableListOf<Byte>()
-        var readied = 0
-        buffer.flip()
-
-        while (readied != dataLen) {
-            val residue = dataLen - readied
-            val needReed = if (residue < readBufferSize) residue else readBufferSize
-
-            val bufferData = ByteBuffer.allocate(needReed)
-            val readData = socket.read(bufferData)
-
-            if (readData == -1)
-                throw SocketException("Exception when receiving package.")
-            var bytesData = bufferData.array()
-
-            if (readData < needReed)
-                bytesData = bytesData.dropLast(needReed - readData).toByteArray()
-            readied += bytesData.size
-            dataB.addAll(bytesData.toList())
-            bufferData.flip()
-        }
-
-        val data = if (command == Command.SEND_FILE)
-            ""
-        else
-            dataB.toByteArray().toString(Charsets.UTF_8)
-
-//        println("Сообщение [${command.name}] [$username] [$data] получено в ${getTimeStr()}")
-        return Msg(command, username, usernameB, timeI.toLong(), timeB, data, dataB)
+        if (readData < needReed)
+            bytesData = bytesData.dropLast(needReed - readData).toByteArray()
+        readied += bytesData.size
+        dataB.addAll(bytesData.toList())
+        bufferData.flip()
     }
+
+    val data = if (command == Command.SEND_FILE)
+        ""
+    else
+        dataB.toByteArray().toString(Charsets.UTF_8)
+
+    return Msg(command, username, usernameB, timeI.toLong(), timeB, data, dataB)
 }
 
 /** Отправка сообщений.
@@ -122,12 +127,40 @@ fun sendMsg(socket: SocketChannel, commandB: Byte, usernameB: ByteArray, timeB: 
     msgB.addAll(dataLenB)            // 2-4 байты: dataLen (3 байта)
     msgB.addAll(usernameB.toList())  // 5-14 байты: username (10 байт)
     msgB.addAll(timeB.toList())      // 15-18 байты: time (4 байта)
-    msgB.addAll(dataB.toList())      // 19 и далее байты: data
 
-    /** Отправка сформированного сообщения **/
-    val buffer = ByteBuffer.wrap(msgB.toByteArray())
-    socket.write(buffer)    // throws IOException
-//    println("Сообщение [$command] [${usernameB.toString(Charsets.UTF_8)}] [${dataB.toString(Charsets.UTF_8)}] отправлено в ${getTimeStr()}")
+    if (command != Command.SEND_FILE.value) {
+        msgB.addAll(dataB.toList())  // 19 и далее байты: data
+
+        /** Отправка сформированного сообщения **/
+        val buffer = ByteBuffer.wrap(msgB.toByteArray())
+        socket.write(buffer)    // throws IOException
+    } else {
+        // Отправляем всё, что до этого сформировали (всё, кроме data)
+        val buffer = ByteBuffer.wrap(msgB.toByteArray())
+        socket.write(buffer)
+        var writed = 0
+        var dataToSend = dataB.toList()
+
+        // Отправка data по кусочкам
+        while (writed != dataLen) {
+            val residue = dataToSend.size
+            val needWrite = if (residue < readBufferSize) residue else readBufferSize
+
+            val data = dataToSend.slice(0 until  needWrite)
+            val bufferData = ByteBuffer.wrap(data.toByteArray())
+            val writeData = socket.write(bufferData)
+
+            if (writeData == 0) {
+                println("[стр 80, Library] writeData == 0")
+                continue
+            }
+            if (writeData == -1)
+                throw SocketException("Exception when write data file.")
+
+            dataToSend = dataToSend.drop(writeData)
+            writed += writeData
+        }
+    }
 }
 
 fun sendMsg(socket: SocketChannel, command: Command, username: String, dataB: ByteArray, timeConst: Long = -1L) {
@@ -145,9 +178,6 @@ fun sendMsg(socket: SocketChannel, command: Command, username: String, dataB: By
 
     sendMsg(socket, commandB, usernameB.toByteArray(), timeB.toByteArray(), dataB)
 }
-
-fun sendMsg(socket: SocketChannel, command: Command, username: String, data: String, timeConst: Long = -1L) =
-    sendMsg(socket, command, username, data.toByteArray(Charsets.UTF_8), timeConst)
 
 /** Метод проверки корректности сообщения на отправку файла. **/
 fun checkSendFileMsg(msg: Msg): Boolean {
