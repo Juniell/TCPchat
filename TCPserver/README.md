@@ -1,9 +1,8 @@
 # Формат команды запуска приложения
-`java -jar TCPServer.jar [-p port] [-l log] [-r readBufferSize]`
+`java -jar TCPServer.jar [-p port] [-l log]`
 
 - `port` - порт сервера (по умолчанию 8888),
-- `log` - ведение логов (по умолчанию true),
-- `readBufferSize` - размер буфера для чтения data (по умолчанию 128 Кбайт).
+- `log` - ведение логов (по умолчанию true).
 
 # Отправка команд
 - `--stop` - завершение работы сервера,

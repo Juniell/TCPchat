@@ -8,8 +8,7 @@ import kotlin.system.exitProcess
 
 class TCPServer(
     port: Int = 8888,
-    private val log: Boolean = true,
-    private val readBufferSize: Int = 128 * 1024      // Размер буфера для чтения (по сколько будем читать)
+    private val log: Boolean = true
 ) {
     private var serverName: String = "__Server__"     // username "__Server__" зарезервирован под сервер
     private var socketServer: ServerSocketChannel = ServerSocketChannel.open()
@@ -27,23 +26,25 @@ class TCPServer(
         socketServer.bind(InetSocketAddress(port))
         println("[${getTimeStr()}] Server started on port ${socketServer.socket().localPort}")
         acceptThread.start()        // старт потока на подключение клиентов
-        readClientsThread.start()   // старт потока на чтение сообщений клиентов todo: останавливать / запускать поток, если нет клиентов / появился первый??
+        readClientsThread.start()   // старт потока на чтение сообщений клиентов
         authThread.start()          // старт потока на авторизацию
         readConsole()               // main - поток на чтение консоли
     }
 
     private fun readConsole() {
-        val read = readLine()?.trim()
-        // Если null -> EOF -> выход сочетанием клавиш
-        if (read == null || read.startsWith("--stop")) {
-            println("\n[${getTimeStr()}] Server shutdown command received.")
-            exit()
+        while (!exit && !Thread.currentThread().isInterrupted) {
+            val read = readLine()?.trim()
+            // Если null -> EOF -> выход сочетанием клавиш
+            if (read == null || read.startsWith("--stop")) {
+                println("\n[${getTimeStr()}] Server shutdown command received.")
+                exit()
+            }
         }
     }
 
     private fun accept() {
-        while (!exit) {
-            sleep(500)
+        while (!exit && !Thread.currentThread().isInterrupted) {
+            sleep()
             val socketClient = socketServer.accept() ?: continue
             socketClient.configureBlocking(false)
             if (log)
@@ -56,8 +57,8 @@ class TCPServer(
 
     /** Обрабатывает список сокетов на авторизацию **/
     private fun auth() {
-        while (!exit) {
-            sleep(500)
+        while (!exit && !Thread.currentThread().isInterrupted) {
+            sleep()
             for (socket in socketsForAccept.toList()) {
                 var msg: Msg?
                 try {
@@ -124,8 +125,8 @@ class TCPServer(
 
     /** Проверяет по очереди всех клиентов на наличие новых сообщений **/
     private fun readClients() {
-        while (!exit) {
-            sleep(500)
+        while (!exit && !Thread.currentThread().isInterrupted) {
+            sleep()
             for (socket in clients.keys) {  // Проходимся по списку клиентов
                 var msg: Msg?
                 try {
@@ -140,7 +141,6 @@ class TCPServer(
                 else {                      // Если было получено непустое сообщение
                     printLogAboutGetMsg(socket, msg.command.value, msg.data)    // выводим в логи полученное сообщение
                     processMsg(socket, msg) // обрабатываем его
-                    // todo: выделить отдельный поток для обработки очереди сообщений???
                 }
             }
         }
@@ -326,6 +326,14 @@ class TCPServer(
                 println("[${getTimeStr()}] <${socket.socket().inetAddress}:${clients[socket]} to $serverName>: *Sending the file.*")
             else
                 println("[${getTimeStr()}] <${socket.socket().inetAddress}:${clients[socket]} to $serverName>: $data")
+    }
+
+    private fun sleep() {
+        try{
+            sleep(500)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
     }
 }
 

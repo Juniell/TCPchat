@@ -10,21 +10,17 @@ class Launcher {
     @Option(name = "-p", usage = "port")
     private var port = 8888
 
-    @Option(name = "-r", usage = "readBufferSize")
-    private var readBufferSize = 5 * 1024
-
-
     private fun launch(args: Array<String>) {
         val parser = CmdLineParser(this)
         try {
             parser.parseArgument(*args)
         } catch (e: CmdLineException) {
             System.err.println(e.message)
-            System.err.println("java -jar TCPClient.jar [-a inetAddress] [-p port] [-r readBufferSize]")
+            System.err.println("java -jar TCPClient.jar [-a inetAddress] [-p port]")
             parser.printUsage(System.err)
         }
         try {
-            TCPClient(port, inetAddress, readBufferSize)
+            TCPClient(port, inetAddress)
         } catch (e: Exception) {
             System.err.println(e.message)
         }

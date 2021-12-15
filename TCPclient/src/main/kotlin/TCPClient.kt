@@ -10,8 +10,7 @@ import kotlin.system.exitProcess
 
 class TCPClient(
     private val port: Int = 8888,
-    private val inetAddress: InetAddress = InetAddress.getLocalHost(),
-    private val readBufferSize: Int = 128 * 1024          // Размер буфера для чтения (по сколько будем читать)
+    private val inetAddress: InetAddress = InetAddress.getLocalHost()
 ) {
     private lateinit var socketServer: SocketChannel
     private var username = ""
@@ -92,7 +91,7 @@ class TCPClient(
 
     /** Чтение сообщений от сервера и их обработка. **/
     private fun readChat() {
-        while (!exit) {
+        while (!exit && !Thread.currentThread().isInterrupted) {
             val msg: Msg
             try {
                 msg = getMsg()
@@ -138,7 +137,7 @@ class TCPClient(
 
     /** Чтение консоли и выполнение команд или отправка соответствующих сообщений. **/
     private fun writeToChat() {
-        while (!exit) {
+        while (!exit && !Thread.currentThread().isInterrupted) {
             val msg = readLine()?.trim()
 
             // Если null -> EOF -> выход сочетанием клавиш

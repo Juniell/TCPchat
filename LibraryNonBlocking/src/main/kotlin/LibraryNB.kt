@@ -79,10 +79,9 @@ fun getMsg(socket: SocketChannel): Msg {
         val bufferData = ByteBuffer.allocate(needReed)
         val readData = socket.read(bufferData)
 
-        if (readData == 0) {
-            println("[стр 80, Library] readData == 0")
+        if (readData == 0)
             continue
-        }
+
         if (readData == -1)
             throw SocketException("Exception when receiving package.")
         var bytesData = bufferData.array()
@@ -150,10 +149,6 @@ fun sendMsg(socket: SocketChannel, commandB: Byte, usernameB: ByteArray, timeB: 
             val bufferData = ByteBuffer.wrap(data.toByteArray())
             val writeData = socket.write(bufferData)
 
-            if (writeData == 0) {
-                println("[стр 80, Library] writeData == 0")
-                continue
-            }
             if (writeData == -1)
                 throw SocketException("Exception when write data file.")
 

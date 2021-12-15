@@ -10,21 +10,17 @@ class Launcher {
     @Option(name = "-l", usage = "log")
     private var log = true
 
-    @Option(name = "-r", usage = "readBufferSize")
-    private var readBufferSize = 5 * 1024
-
-
     private fun launch(args: Array<String>) {
         val parser = CmdLineParser(this)
         try {
             parser.parseArgument(*args)
         } catch (e: CmdLineException) {
             System.err.println(e.message)
-            System.err.println("java -jar TCPServer.jar [-p port] [-l log] [-r readBufferSize]")
+            System.err.println("java -jar TCPServer.jar [-p port] [-l log]")
             parser.printUsage(System.err)
         }
         try {
-            TCPServer(port, log, readBufferSize)
+            TCPServer(port, log)
         } catch (e: Exception) {
             System.err.println(e.message)
         }
